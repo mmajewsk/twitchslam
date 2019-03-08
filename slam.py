@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-import os
+
 import sys
 
 sys.path.append("lib/macosx")
 sys.path.append("lib/linux")
 
 import time
-import cv2
-from display import Display2D, Display3D
 from frame import Frame, match_frames
 import numpy as np
-import g2o
 from pointmap import Map, Point
 from helpers import triangulate, add_ones
 
@@ -156,82 +153,4 @@ class SLAM(object):
     print("Time:     %.2f ms" % ((time.time()-start_time)*1000.0))
     print(np.linalg.inv(f1.pose))
 
-
-if __name__ == "__main__":
-  if len(sys.argv) < 2:
-    print("%s <video.mp4>" % sys.argv[0])
-    exit(-1)
-
-  disp2d, disp3d = None, None
-    
-  if os.getenv("HEADLESS") is None:
-    disp3d = Display3D()
-
-  cap = cv2.VideoCapture(sys.argv[1])
-
-  # camera parameters
-  W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-  H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-  CNT = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-  F = float(os.getenv("F", "525"))
-  if os.getenv("SEEK") is not None:
-    cap.set(cv2.CAP_PROP_POS_FRAMES, int(os.getenv("SEEK")))
-
-  if W > 1024:
-    downscale = 1024.0/W
-    F *= downscale
-    H = int(H * downscale)
-    W = 1024
-  print("using camera %dx%d with F %f" % (W,H,F))
-
-  # camera intrinsics
-  K = np.array([[F,0,W//2],[0,F,H//2],[0,0,1]])
-  Kinv = np.linalg.inv(K)
-
-  # create 2-D display
-  if os.getenv("HEADLESS") is None:
-    disp2d = Display2D(W, H)
-
-  slam = SLAM(W, H, K)
-
-  """
-  mapp.deserialize(open('map.json').read())
-  while 1:
-    disp3d.paint(mapp)
-    time.sleep(1)
-  """
-
-  gt_pose = None
-  if len(sys.argv) >= 3:
-    gt_pose = np.load(sys.argv[2])['pose']
-    # add scale param?
-    gt_pose[:, :3, 3] *= 50
-
-  i = 0
-  while cap.isOpened():
-    ret, frame = cap.read()
-    frame = cv2.resize(frame, (W, H))
-
-    print("\n*** frame %d/%d ***" % (i, CNT))
-    if ret == True:
-      slam.process_frame(frame, None if gt_pose is None else np.linalg.inv(gt_pose[i]))
-    else:
-      break
-
-    # 3-D display
-    if disp3d is not None:
-      disp3d.paint(slam.mapp)
-
-    if disp2d is not None:
-      img = slam.mapp.frames[-1].annotate(frame)
-      disp2d.paint(img)
-
-    i += 1
-    """
-    if i == 10:
-      with open('map.json', 'w') as f:
-        f.write(mapp.serialize())
-        exit(0)
-    """
 
