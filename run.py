@@ -1,11 +1,7 @@
 from slam import SLAM
-import sys
-import os
 import cv2
 import numpy as np
 from display import Display2D, Display3D
-import g2o
-
 import argparse
 
 def create_camera_params(cap):
@@ -30,8 +26,8 @@ def create_camera_params(cap):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("video_path", type=str, help="path to the video")
-    parser.add_argument("pose_path", type=str, help="pose file path", default=None)
+    parser.add_argument("video_path", nargs="?", type=str, help="path to the video")
+    parser.add_argument("pose_path",  nargs="?", type=str, help="pose file path", default=None)
     parser.add_argument("--headless", type=bool, default=None)
     parser.add_argument("-f", type=int, default=525)
     parser.add_argument("--seek", action='store_true', default=False)
