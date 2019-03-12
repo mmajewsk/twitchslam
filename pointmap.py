@@ -48,7 +48,8 @@ class Map(object):
   def __init__(self):
     self.frames = []
     self.points = []
-
+    self.max_frame = 0
+    self.max_point = 0
 
   def serialize(self):
     ret = {}
@@ -59,10 +60,14 @@ class Map(object):
         'id': f.id, 'K': f.K.tolist(), 'pose': f.pose.tolist(), 'h': f.h, 'w': f.w, 
         'kpus': f.kpus.tolist(), 'des': f.des.tolist(),
         'pts': [p.id if p is not None else -1 for p in f.pts]})
+    ret['max_frame'] = self.max_frame
+    ret['max_point'] = self.max_point
     return json.dumps(ret)
 
   def deserialize(self, s):
     ret = json.loads(s)
+    self.max_frame = ret['max_frame']
+    self.max_point = ret['max_point']
     self.points = []
     self.frames = []
 
@@ -84,26 +89,25 @@ class Map(object):
       self.frames.append(ff)
 
   def add_point(self, point):
+    ret = self.max_point
+    self.max_point += 1
     self.points.append(point)
-    return len(self.points)-1
+    return ret
 
   def add_frame(self, frame):
+    ret = self.max_frame
+    self.max_frame += 1
     self.frames.append(frame)
-    return self.max_frame
+    return ret
 
-  @property
-  def max_frame(self):
-    return len(self.frames)-1
-
-  @property
-  def max_point(self):
-    return len(self.points)-1
-
+  def pop_frame(self):
+    self.max_point -= 1
+    return self.frames.pop()
   # *** optimizer ***
   
-  def optimize(self, local_window=LOCAL_WINDOW, fix_points=False, verbose=False, rounds=50):
+  def optimize(self, local_window=LOCAL_WINDOW, fix_points=False, verbose=False, rounds=50, reset_map_optimiser=True):
     map_optimizer = Optimize(fix_points=fix_points, verbose=verbose)
-    err = map_optimizer.optimise(local_window, self.frames, self.points, rounds)
+    err = map_optimizer.optimise(local_window, self.frames, self.points, rounds=rounds)
 
     # prune points
     culled_pt_count = 0

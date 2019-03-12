@@ -7,9 +7,9 @@ class Optimize:
 
 		# create g2o optimizer
 		self.opt = g2o.SparseOptimizer()
-		solver = g2o.BlockSolverSE3(g2o.LinearSolverCSparseSE3())
-		solver = g2o.OptimizationAlgorithmLevenberg(solver)
-		self.opt.set_algorithm(solver)
+		self.solver = g2o.BlockSolverSE3(g2o.LinearSolverCSparseSE3())
+		self.solver = g2o.OptimizationAlgorithmLevenberg(self.solver)
+		self.opt.set_algorithm(self.solver)
 
 		# add normalized camera
 		cam = g2o.CameraParameters(1.0, (0.0, 0.0), 0)
@@ -71,7 +71,7 @@ class Optimize:
 		self.prepare_optimiser(verbose)
 		self.fix_points = fix_points
 
-	def optimise(self, local_window, frames, points, rounds=50):
+	def optimise(self, local_window, frames, points,rounds=50):
 		if local_window is None:
 			local_frames = frames
 		else:

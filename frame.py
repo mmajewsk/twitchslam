@@ -8,6 +8,14 @@ np.set_printoptions(suppress=True)
 from skimage.measure import ransac
 from helpers import add_ones, poseRt, fundamentalToRt, normalize, EssentialMatrixTransform, myjet
 
+import logging
+logging.basicConfig(format='%(asctime)s [%(levelname)s]= %(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+class NoFrameMatchError(Exception):
+    pass
+
 def extractFeatures(img):
     orb = cv2.ORB_create()
     # detection
@@ -49,11 +57,14 @@ def match_frames(f1, f2):
     assert(len(set(idx1)) == len(idx1))
     assert(len(set(idx2)) == len(idx2))
 
-    assert len(ret) >= 8
+    if len(ret) < 8:
+        logger.warning("Skipping match of frame {} to frame {}".format(f1.id, f2.id))
+        raise NoFrameMatchError
     ret = np.array(ret)
     idx1 = np.array(idx1)
     idx2 = np.array(idx2)
 
+    print(len(ret[0]))
     # fit matrix
     model, inliers = ransac((ret[:, 0], ret[:, 1]),
                             EssentialMatrixTransform,
@@ -64,7 +75,7 @@ def match_frames(f1, f2):
     return idx1[inliers], idx2[inliers], fundamentalToRt(model.params)
 
 class Frame(object):
-    def __init__(self, mapp, img, K, pose=np.eye(4), tid=None, verts=None):
+    def __init__(self, img, K, pose=np.eye(4), verts=None):
         self.K = np.array(K)
         self.pose = np.array(pose)
 
@@ -81,30 +92,7 @@ class Frame(object):
             self.h, self.w = 0, 0
             self.kpus, self.des, self.pts = None, None, None
 
-        self.id = tid if tid is not None else mapp.add_frame(self)
 
-    def annotate(self, img):
-        # paint annotations on the image
-        for i1 in range(len(self.kpus)):
-            u1, v1 = int(round(self.kpus[i1][0])), int(round(self.kpus[i1][1]))
-            if self.pts[i1] is not None:
-                if len(self.pts[i1].frames) >= 5:
-                    cv2.circle(img, (u1, v1), color=(0,255,0), radius=3)
-                else:
-                    cv2.circle(img, (u1, v1), color=(0,128,0), radius=3)
-                # draw the trail
-                pts = []
-                lfid = None
-                for f, idx in zip(self.pts[i1].frames[-9:][::-1], self.pts[i1].idxs[-9:][::-1]):
-                    if lfid is not None and lfid-1 != f.id:
-                        break
-                    pts.append(tuple(map(lambda x: int(round(x)), f.kpus[idx])))
-                    lfid = f.id
-                if len(pts) >= 2:
-                    cv2.polylines(img, np.array([pts], dtype=np.int32), False, myjet[len(pts)]*255, thickness=1, lineType=16)
-            else:
-                cv2.circle(img, (u1, v1), color=(0,0,0), radius=3)
-        return img
 
 
     # inverse of intrinsics matrix
@@ -127,4 +115,3 @@ class Frame(object):
         if not hasattr(self, '_kd'):
             self._kd = cKDTree(self.kpus)
         return self._kd
-

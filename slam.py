@@ -6,7 +6,7 @@ sys.path.append("lib/macosx")
 sys.path.append("lib/linux")
 
 import time
-from frame import Frame, match_frames
+from frame import Frame, NoFrameMatchError, match_frames
 import numpy as np
 from pointmap import Map, Point
 from helpers import triangulate, add_ones
@@ -24,23 +24,21 @@ class SLAM(object):
     def __init__(self, W, H, K):
         # main classes
         self.mapp = Map()
-
         # params
         self.W, self.H = W, H
         self.K = K
 
-    def add_observations(self, f1, f2, idx1, idx2):
+    def add_observations(self, frame_1, frame_2, idx1, idx2):
         # add new observations if the point is already observed in the previous frame
         # TODO: consider tradeoff doing this before/after search by projection
-        # @TODO #mmajewsk explain
         for i,idx in enumerate(idx2):
-            if f2.pts[idx] is not None and f1.pts[idx1[i]] is None:
-                f2.pts[idx].add_observation(f1, idx1[i])
-        return f2
+            if frame_2.pts[idx] is not None and frame_1.pts[idx1[i]] is None:
+                frame_2.pts[idx].add_observation(frame_1, idx1[i])
+        return frame_2
 
-    def make_initial_pose(self, frame, Rt, f1, f2):
+    def make_initial_pose(self, Rt, f1, f2):
         # @TODO #mmajewsk explain
-        if frame.id < 5 or True:
+        if f1.id < 5 or True:
             # get initial positions from fundamental matrix
             f1.pose = np.dot(Rt, f2.pose)
         else:
@@ -148,12 +146,10 @@ class SLAM(object):
             new_pts_count += 1
 
 
-    def _profiled_process_frame(self, frame, img, pose=None, verts=None):
-        f1 = self.mapp.frames[-1]
-        f2 = self.mapp.frames[-2]
+    def _profiled_process_frame(self, f1, f2, img, pose=None, verts=None):
         idx1, idx2, Rt = match_frames(f1, f2)
         f2 = self.add_observations(f1,f2,idx1,idx2)
-        f1 = self.make_initial_pose( frame, Rt, f1, f2)
+        f1 = self.make_initial_pose( Rt, f1, f2)
         f1 = self.optimise_pose(pose, f1)
         sbp_pts_count = self.search_by_projection(f1)
         # adding new points to the map from pairwise matches
@@ -161,7 +157,7 @@ class SLAM(object):
         pts4d, good_pts4d = self.triangulate(f1, f2, idx1, idx2)
         self.match_points(pts4d, good_pts4d, f1, f2, idx1, idx2, img, new_pts_count)
         # optimize the map
-        if frame.id >= 4 and frame.id%5 == 0:
+        if f1.id >= 4 and f1.id%5 == 0:
             err = self.mapp.optimize() #verbose=True)
             logger.info("Optimize: %f units of error" % err)
         return new_pts_count, sbp_pts_count, f1
@@ -169,10 +165,16 @@ class SLAM(object):
     def process_frame(self, img, pose=None, verts=None):
         assert img.shape[0:2] == (self.H, self.W)
         start_time = time.time()
-        frame = Frame(self.mapp, img, self.K, verts=verts)
-        if frame.id == 0:
+        f1 = Frame(img, self.K, verts=verts)
+        f1.id = self.mapp.add_frame(f1)
+        if f1.id == 0:
             return
-        new_pts_count, sbp_pts_count, f1 = self._profiled_process_frame(frame, img, pose, verts)
+        try:
+            f2 = self.mapp.frames[-2]
+            new_pts_count, sbp_pts_count, f1 = self._profiled_process_frame(f1, f2, img, pose, verts)
+        except NoFrameMatchError as e:
+            self.mapp.pop_frame()
+            raise e
         logger.info("Adding:   %d new points, %d search by projection" % (new_pts_count, sbp_pts_count))
         logger.info("Map:      %d points, %d frames" % (len(self.mapp.points), len(self.mapp.frames)))
         logger.info("Time:     %.2f ms" % ((time.time()-start_time)*1000.0))

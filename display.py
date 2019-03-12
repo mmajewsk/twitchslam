@@ -1,5 +1,33 @@
 import pygame
 from pygame.locals import DOUBLEBUF
+from frame import Frame
+import numpy as np
+import cv2
+from helpers import myjet
+
+def annotate(frame: Frame, img : np.ndarray) -> np.ndarray:
+        # paint annotations on the image
+        for i1 in range(len(frame.kpus)):
+            u1, v1 = int(round(frame.kpus[i1][0])), int(round(frame.kpus[i1][1]))
+            if frame.pts[i1] is not None:
+                if len(frame.pts[i1].frames) >= 5:
+                    cv2.circle(img, (u1, v1), color=(0,255,0), radius=3)
+                else:
+                    cv2.circle(img, (u1, v1), color=(0,128,0), radius=3)
+                # draw the trail
+                pts = []
+                lfid = None
+                for f, idx in zip(frame.pts[i1].frames[-9:][::-1], frame.pts[i1].idxs[-9:][::-1]):
+                    if lfid is not None and lfid-1 != f.id:
+                        break
+                    pts.append(tuple(map(lambda x: int(round(x)), f.kpus[idx])))
+                    lfid = f.id
+                if len(pts) >= 2:
+                    cv2.polylines(img, np.array([pts], dtype=np.int32), False, myjet[len(pts)]*255, thickness=1, lineType=16)
+            else:
+                cv2.circle(img, (u1, v1), color=(0,0,0), radius=3)
+        return img
+
 
 class Display2D(object):
   def __init__(self, W, H):

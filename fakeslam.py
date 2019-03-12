@@ -9,7 +9,7 @@ sys.path.append("lib/linux")
 import numpy as np
 from slam import SLAM
 from renderer import Renderer
-from display import Display2D, Display3D
+from display import Display2D, Display3D, annotate
 
 if __name__ == "__main__":
   W,H = 640,480
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     slam.process_frame(frame, None, verts)
     disp3d.paint(slam.mapp)
 
-    img = slam.mapp.frames[-1].annotate(frame)
+    img = annotate(slam.mapp.frames[-1],frame)
     disp2d.paint(img)
 
     # flip flop
