@@ -37,12 +37,14 @@ class Point(object):
       f.pts[idx] = None
     del self
 
-  def add_observation(self, frame, idx):
-    assert frame.pts[idx] is None
+  def join_frame(self, frame, idx):
     assert frame not in self.frames
-    frame.pts[idx] = self
     self.frames.append(frame)
     self.idxs.append(idx)
+
+def connect_frame_point(frame: Frame, point: Point, idx):
+ point.join_frame(frame, idx)
+ frame.join_point(point, idx)
 
 class Map(object):
   def __init__(self):

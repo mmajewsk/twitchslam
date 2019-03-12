@@ -8,7 +8,7 @@ sys.path.append("lib/linux")
 import time
 from frame import Frame, NoFrameMatchError, match_frames
 import numpy as np
-from pointmap import Map, Point
+from pointmap import Map, Point, connect_frame_point
 from helpers import triangulate, add_ones
 import logging
 
@@ -33,7 +33,7 @@ class SLAM(object):
         # TODO: consider tradeoff doing this before/after search by projection
         for i,idx in enumerate(idx2):
             if frame_2.pts[idx] is not None and frame_1.pts[idx1[i]] is None:
-                frame_2.pts[idx].add_observation(frame_1, idx1[i])
+                connect_frame_point(frame_1, frame_2.pts[idx], idx1[i])
         return frame_2
 
     def make_initial_pose(self, Rt, f1, f2):
@@ -87,7 +87,7 @@ class SLAM(object):
                         b_dist = p.orb_distance(f1.des[m_idx])
                         # if any descriptors within 64
                         if b_dist < 64.0:
-                            p.add_observation(f1, m_idx)
+                            connect_frame_point(f1, p,  m_idx)
                             sbp_pts_count += 1
                             break
         return sbp_pts_count
@@ -141,8 +141,8 @@ class SLAM(object):
             except IndexError:
                 color = (255,0,0)
             pt = Point(self.mapp, p[0:3], color)
-            pt.add_observation(f2, idx2[i])
-            pt.add_observation(f1, idx1[i])
+            connect_frame_point(f2, pt, idx2[i])
+            connect_frame_point(f1, pt, idx1[i])
             new_pts_count += 1
 
 

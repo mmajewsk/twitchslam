@@ -92,7 +92,9 @@ class Frame(object):
             self.h, self.w = 0, 0
             self.kpus, self.des, self.pts = None, None, None
 
-
+    def join_point(self, point, idx):
+        assert self.pts[idx] is None
+        self.pts[idx] = point
 
 
     # inverse of intrinsics matrix
