@@ -23,14 +23,62 @@ def extractFeatures(img):
 
     # extraction
     kps = [cv2.KeyPoint(x=f[0][0], y=f[0][1], _size=20) for f in pts]
-    kps, des = orb.compute(img, kps)
+    kps, descriptors = orb.compute(img, kps)
 
-    # return pts and des
-    return np.array([(kp.pt[0], kp.pt[1]) for kp in kps]), des
+    # return pts and descriptors
+    return np.array([(kp.pt[0], kp.pt[1]) for kp in kps]), descriptors
+class Frame(object):
+    def __init__(self, img, K, pose=np.eye(4), verts=None):
+        self.K = np.array(K)
+        self.pose = np.array(pose)
+        self.img = img
+        if img is not None:
+            self.h, self.w = img.shape[0:2]
+            if verts is None:
+                self.key_points, self.descriptors = extractFeatures(img)
+            else:
+                assert len(verts) < 256
+                self.key_points, self.descriptors = verts, np.array(list(range(len(verts))) * 32, np.uint8).reshape(32, len(verts)).T
+            self.pts = [None]*len(self.key_points)
+        else:
+            # fill in later
+            self.h, self.w = 0, 0
+            self.key_points, self.descriptors, self.pts = None, None, None
 
-def match_frames(f1, f2):
+    def join_point(self, point, idx):
+        assert self.pts[idx] is None
+        self.pts[idx] = point
+
+    def leave_point(self, point, idx):
+        assert self.pts[idx] is not None
+        assert point in self.pts
+        del self.pts[idx]
+
+    # inverse of intrinsics matrix
+    @property
+    def Kinv(self):
+        if not hasattr(self, '_Kinv'):
+            self._Kinv = np.linalg.inv(self.K)
+        return self._Kinv
+
+    # normalized keypoints
+    @property
+    def kps(self):
+        if not hasattr(self, '_kps'):
+            self._kps = normalize(self.Kinv, self.key_points)
+        return self._kps
+
+    # KD tree of unnormalized keypoints
+    @property
+    def kd(self):
+        if not hasattr(self, '_kd'):
+            self._kd = cKDTree(self.key_points)
+        return self._kd
+
+
+def match_frames(frame_1: Frame, frame_2: Frame):
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-    matches = bf.knnMatch(f1.des, f2.des, k=2)
+    matches = bf.knnMatch(frame_1.descriptors, frame_2.descriptors, k=2)
 
     # Lowe's ratio test
     ret = []
@@ -39,8 +87,8 @@ def match_frames(f1, f2):
 
     for m,n in matches:
         if m.distance < 0.75*n.distance:
-            p1 = f1.kps[m.queryIdx]
-            p2 = f2.kps[m.trainIdx]
+            p1 = frame_1.kps[m.queryIdx]
+            p2 = frame_2.kps[m.trainIdx]
 
             # be within orb distance 32
             if m.distance < 32:
@@ -58,62 +106,20 @@ def match_frames(f1, f2):
     assert(len(set(idx2)) == len(idx2))
 
     if len(ret) < 8:
-        logger.warning("Skipping match of frame {} to frame {}".format(f1.id, f2.id))
+        logger.warning("Skipping match of frame {} to frame {}".format(frame_1.id, frame_2.id))
         raise NoFrameMatchError
     ret = np.array(ret)
     idx1 = np.array(idx1)
     idx2 = np.array(idx2)
 
-    print(len(ret[0]))
     # fit matrix
     model, inliers = ransac((ret[:, 0], ret[:, 1]),
                             EssentialMatrixTransform,
                             min_samples=8,
                             residual_threshold=RANSAC_RESIDUAL_THRES,
                             max_trials=RANSAC_MAX_TRIALS)
-    print("Matches:  %d -> %d -> %d -> %d" % (len(f1.des), len(matches), len(inliers), sum(inliers)))
+    logger.info("Quality: {}".format(np.mean(ret[:, 0]-ret[:, 1])))
+    logger.info("Matches:  %d -> %d -> %d -> %d" % (len(frame_1.descriptors), len(matches), len(inliers), sum(inliers)))
     return idx1[inliers], idx2[inliers], fundamentalToRt(model.params)
 
-class Frame(object):
-    def __init__(self, img, K, pose=np.eye(4), verts=None):
-        self.K = np.array(K)
-        self.pose = np.array(pose)
 
-        if img is not None:
-            self.h, self.w = img.shape[0:2]
-            if verts is None:
-                self.kpus, self.des = extractFeatures(img)
-            else:
-                assert len(verts) < 256
-                self.kpus, self.des = verts, np.array(list(range(len(verts)))*32, np.uint8).reshape(32, len(verts)).T
-            self.pts = [None]*len(self.kpus)
-        else:
-            # fill in later
-            self.h, self.w = 0, 0
-            self.kpus, self.des, self.pts = None, None, None
-
-    def join_point(self, point, idx):
-        assert self.pts[idx] is None
-        self.pts[idx] = point
-
-
-    # inverse of intrinsics matrix
-    @property
-    def Kinv(self):
-        if not hasattr(self, '_Kinv'):
-            self._Kinv = np.linalg.inv(self.K)
-        return self._Kinv
-
-    # normalized keypoints
-    @property
-    def kps(self):
-        if not hasattr(self, '_kps'):
-            self._kps = normalize(self.Kinv, self.kpus)
-        return self._kps
-
-    # KD tree of unnormalized keypoints
-    @property
-    def kd(self):
-        if not hasattr(self, '_kd'):
-            self._kd = cKDTree(self.kpus)
-        return self._kd

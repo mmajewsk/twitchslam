@@ -122,14 +122,24 @@ if __name__ == "__main__":
         gt_pose[:, :3, 3] *= 50
 
     i = 0
+    prev_gray = None
     while stream.ss.is_next():
         ret, image = stream.ss.get_next()
         image = cv2.resize(image, (W, H))
-
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        mov = None
+        if prev_gray is not None:
+            mov = cv2.absdiff(gray,prev_gray)
+        if mov is not None  and np.sum(mov) < 100 :
+            prev_gray = gray
+            logger.debug("Skipping no movement")
+            continue
+        blur = cv2.Laplacian(gray, cv2.CV_64F).var()
+        logger.debug("Blur: {}".format(blur))
         logger.info("\n*** image %d/%d ***" % (i, CNT))
         if ret == True:
             try:
-                slam.process_frame(image, None if gt_pose is None else np.linalg.inv(gt_pose[i]))
+                params = slam.process_frame(image, None if gt_pose is None else np.linalg.inv(gt_pose[i]))
             except NoFrameMatchError:
                 continue
 
@@ -143,8 +153,13 @@ if __name__ == "__main__":
         if disp2d is not None:
             img = annotate(slam.mapp.frames[-1],image)
             disp2d.paint(img)
-
+            if params and 'movement' in params.keys():
+                if prev_gray is not None:
+                    disp2d.add_text(str(np.sum(mov)))
+                    cv2.imshow('movement', mov)
+                cv2.waitKey(1)
         i += 1
+        prev_gray = gray
         """
         if i == 10:
           with open('map.json', 'w') as f:

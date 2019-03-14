@@ -27,10 +27,10 @@ class Point(object):
     return add_ones(self.pt)
 
   def orb(self):
-    return [f.des[idx] for f,idx in zip(self.frames, self.idxs)]
+    return [f.descriptors[idx] for f,idx in zip(self.frames, self.idxs)]
 
-  def orb_distance(self, des):
-    return min([hamming_distance(o, des) for o in self.orb()])
+  def orb_distance(self, descriptors):
+    return min([hamming_distance(o, descriptors) for o in self.orb()])
   
   def delete(self):
     for f,idx in zip(self.frames, self.idxs):
@@ -42,9 +42,18 @@ class Point(object):
     self.frames.append(frame)
     self.idxs.append(idx)
 
+  def leave_frame(self, frame, idx):
+    assert frame in self.frames
+    del self.frames[idx]
+    assert frame not in self.frames
+
 def connect_frame_point(frame: Frame, point: Point, idx):
  point.join_frame(frame, idx)
  frame.join_point(point, idx)
+
+def disconnect_frame_point(frame: Frame, point: Point, idx):
+  point.leave_frame(frame, idx)
+  frame.leave_point(frame, idx)
 
 class Map(object):
   def __init__(self):
@@ -60,7 +69,7 @@ class Map(object):
     for f in self.frames:
       ret['frames'].append({
         'id': f.id, 'K': f.K.tolist(), 'pose': f.pose.tolist(), 'h': f.h, 'w': f.w, 
-        'kpus': f.kpus.tolist(), 'des': f.des.tolist(),
+        'kpus': f.kpus.tolist(), 'descriptors': f.descriptors.tolist(),
         'pts': [p.id if p is not None else -1 for p in f.pts]})
     ret['max_frame'] = self.max_frame
     ret['max_point'] = self.max_point
@@ -82,9 +91,9 @@ class Map(object):
     for f in ret['frames']:
       ff = Frame(self, None, f['K'], f['pose'], f['id'])
       ff.w, ff.h = f['w'], f['h']
-      ff.kpus = np.array(f['kpus'])
-      ff.des = np.array(f['des'])
-      ff.pts = [None] * len(ff.kpus)
+      ff.key_points = np.array(f['kpus'])
+      ff.descriptors = np.array(f['descriptors'])
+      ff.pts = [None] * len(ff.key_points)
       for i,p in enumerate(f['pts']):
         if p != -1:
           ff.pts[i] = pids[p]
@@ -106,6 +115,7 @@ class Map(object):
     self.max_point -= 1
     return self.frames.pop()
   # *** optimizer ***
+
   
   def optimize(self, local_window=LOCAL_WINDOW, fix_points=False, verbose=False, rounds=50, reset_map_optimiser=True):
     map_optimizer = Optimize(fix_points=fix_points, verbose=verbose)
