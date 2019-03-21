@@ -18,7 +18,29 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s]= %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+class Tracker:
+    def __init__(self, mapp):
+        self.mapp = mapp
+        self.frame_1 = None
+        self.frame_2 = None
 
+    def image_to_track(self, img, verts, K):
+        self.frame_2 = self.frame_1
+        self.frame_1 = Frame(img, K, verts=verts)
+
+    def track(self):
+        return match_frames(self.frame_1, self.frame_2)
+
+    def make_initial_pose(self, rotation_matrix):
+        if self.frame_1.id < 5 or True:
+            # get initial positions from fundamental matrix
+            # apply the rotation matrix to the rotation matrix from previous round
+            self.frame_1.pose = np.dot(rotation_matrix, self.frame_2.pose)
+        else:
+            # kinematic model (not used)
+            velocity = np.dot(self.frame_2.pose, np.linalg.inv(self.mapp.frames[-3].pose))
+            self.frame_1.pose = np.dot(velocity, self.frame_2.pose)
+        return self.frame_1
 
 class SLAM(object):
     def __init__(self, W, H, K):
@@ -28,75 +50,12 @@ class SLAM(object):
         self.W, self.H = W, H
         self.K = K
         self.distances = []
+        self.tracker = Tracker(self.mapp)
 
-    def add_observations(self, frame_1, frame_2, idx1, idx2):
-        # add new observations if the point is already observed in the previous frame
-        # TODO: consider tradeoff doing this before/after search by projection
-        for i,idx in enumerate(idx2):
-            if frame_2.pts[idx] is not None and frame_1.pts[idx1[i]] is None:
-                connect_frame_point(frame_1, frame_2.pts[idx], idx1[i])
-        return frame_2
-
-    def make_initial_pose(self, rotation_matrix, frame_1, frame_2):
-        if frame_1.id < 5 or True:
-            # get initial positions from fundamental matrix
-            # apply the rotation matrix to the rotation matrix from previous round
-            frame_1.pose = np.dot(rotation_matrix, frame_2.pose)
-        else:
-            # kinematic model (not used)
-            velocity = np.dot(frame_2.pose, np.linalg.inv(self.mapp.frames[-3].pose))
-            frame_1.pose = np.dot(velocity, frame_2.pose)
-        return frame_1
-
-    def optimise_pose(self, pose, frame_1):
-        #@TODO #mmajewsk explain. This code seems to not be doing anything
-        # pose optimization
-        if pose is None:
-            #print(frame_1.pose)
-            pose_opt = self.mapp.optimize(local_window=1, fix_points=True)
-            logger.info("Pose:     %f" % pose_opt)
-            #print(frame_1.pose)
-        else:
-            # have ground truth for pose
-            frame_1.pose = pose
-        return frame_1
-
-    def search_by_projection(self, frame_1):
-        # search by projection
-        sbp_pts_count = 0
-        if len(self.mapp.points) > 0:
-            # project *all* the map points into the current frame
-            map_points = np.array([p.homogeneous() for p in self.mapp.points])
-            projs = np.dot(np.dot(self.K, frame_1.pose[:3]), map_points.T).T
-            projs = projs[:, 0:2] / projs[:, 2:]
-
-            # only the points that fit in the frame
-            good_pts = (projs[:, 0] > 0) & (projs[:, 0] < self.W) & \
-                       (projs[:, 1] > 0) & (projs[:, 1] < self.H)
-
-            for i, p in enumerate(self.mapp.points):
-                if not good_pts[i]:
-                    # point not visible in frame
-                    continue
-                if frame_1 in p.frames:
-                    # we already matched this map point to this frame
-                    # TODO: understand this better
-                    continue
-                for m_idx in frame_1.kd.query_ball_point(projs[i], 2):
-                    # if point unmatched
-                    if frame_1.pts[m_idx] is None:
-                        b_dist = p.orb_distance(frame_1.descriptors[m_idx])
-                        # if any descriptors within 64
-                        if b_dist < 64.0:
-                            connect_frame_point(frame_1, p,  m_idx)
-                            sbp_pts_count += 1
-                            break
-        return sbp_pts_count
 
     def triangulate(self, frame_1, frame_2, idx1, idx2):
         # triangulate the points we don't have matches for
         good_pts4d = np.array([frame_1.pts[i] is None for i in idx1])
-
         # do triangulation in global frame
         pts4d = triangulate(frame_1.pose, frame_2.pose, frame_1.kps[idx1], frame_2.kps[idx2])
         good_pts4d &= np.abs(pts4d[:, 3]) != 0
@@ -146,33 +105,33 @@ class SLAM(object):
             connect_frame_point(frame_1, pt, idx1[i])
             new_pts_count += 1
 
-
-    def _profiled_process_frame(self, frame_1, frame_2, img, pose=None, verts=None):
-        idx1, idx2, rotation_matrix = match_frames(frame_1, frame_2)
-        frame_1 = self.make_initial_pose( rotation_matrix, frame_1, frame_2)
-        irame_2 = self.add_observations(frame_1,frame_2,idx1,idx2)
-        frame_1 = self.optimise_pose(pose, frame_1)
-        sbp_pts_count = self.search_by_projection(frame_1)
+    def reoptimize(self, idx1, idx2, img):
+        sbp_pts_count = self.mapp.search_by_projection(self.tracker.frame_1, self.K, self.W, self.H)
         # adding new points to the map from pairwise matches
         new_pts_count = 0
-        pts4d, good_pts4d = self.triangulate(frame_1, frame_2, idx1, idx2)
-        self.match_points(pts4d, good_pts4d, frame_1, frame_2, idx1, idx2, img, new_pts_count)
-        # optimize the map
-        if frame_1.id >= 4 and frame_1.id%5 == 0:
-            err = self.mapp.optimize() #verbose=True)
-            logger.info("Optimize: %f units of error" % err)
-        return new_pts_count, sbp_pts_count, frame_1
+        pts4d, good_pts4d = self.triangulate( self.tracker.frame_1, self.tracker.frame_2, idx1, idx2)
+        self.match_points(pts4d, good_pts4d, self.tracker.frame_1, self.tracker.frame_2, idx1, idx2, img, new_pts_count)
+        return new_pts_count, sbp_pts_count
+
 
     def process_frame(self, img, pose=None, verts=None):
         assert img.shape[0:2] == (self.H, self.W)
         start_time = time.time()
-        frame_1 = Frame(img, self.K, verts=verts)
-        frame_1.id = self.mapp.add_frame(frame_1)
-        if frame_1.id == 0:
+        self.tracker.image_to_track(img, verts, self.K)
+        self.tracker.frame_1.id = self.mapp.add_frame(self.tracker.frame_1)
+        if self.tracker.frame_1.id == 0:
             return
         try:
-            frame_2 = self.mapp.frames[-2]
-            new_pts_count, sbp_pts_count, frame_1 = self._profiled_process_frame(frame_1, frame_2, img, pose, verts)
+            idx1, idx2, rotation_matrix = self.tracker.track()
+            frame_1 = self.tracker.make_initial_pose( rotation_matrix)
+            self.mapp.connect_observations(self.tracker.frame_1, self.tracker.frame_2, idx1, idx2)
+            frame_1 = self.mapp.optimise_pose(pose, frame_1)
+            new_pts_count, sbp_pts_count = self.reoptimize(idx1, idx2, img)
+            # optimize the map
+            if frame_1.id >= 4 and frame_1.id%5 == 0:
+                err = self.mapp.optimize() #verbose=True)
+                logger.info("Optimize: %f units of error" % err)
+
         except NoFrameMatchError as e:
             self.mapp.pop_frame()
             raise e
@@ -183,7 +142,7 @@ class SLAM(object):
         #     self.distances.append(distance)
         #     plt.plot(self.distances)
         #     plt.show()
-        movement = cv2.absdiff(frame_1.img, frame_2.img)
+        movement = cv2.absdiff(frame_1.img, self.tracker.frame_2.img)
         logger.info("Adding:   %d new points, %d search by projection" % (new_pts_count, sbp_pts_count))
         logger.info("Map:      %d points, %d frames" % (len(self.mapp.points), len(self.mapp.frames)))
         logger.info("Time:     %.2f ms" % ((time.time()-start_time)*1000.0))
