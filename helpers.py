@@ -45,8 +45,13 @@ def poseRt(R, t):
 
 # pose
 def fundamentalToRt(F):
-  W = np.mat([[0,-1,0],[1,0,0],[0,0,1]],dtype=float)
-  U,d,Vt = np.linalg.svd(F)
+  _W = [
+         [0, -1, 0],
+         [1, 0, 0],
+         [0, 0, 1]
+       ]
+  W = np.mat(_W, dtype=float)
+  U, d, Vt = np.linalg.svd(F)
   if np.linalg.det(U) < 0:
     U *= -1.0
   if np.linalg.det(Vt) < 0:
@@ -91,6 +96,11 @@ class EssentialMatrixTransform(object):
 
     # Solve for the nullspace of the constraint matrix.
     _, _, V = np.linalg.svd(A)
+    # So We fill the A with the coordinates from both frames
+    # And we say that Ax = 0. So that Internally A contains the data abaout the
+    # two frames, and there is some transformation x, that nullifies those two.
+    # that transformation is the actual transformation that we are looking for.
+    # Since SVD(A) == UEV, and V contains the right null space:
     F = V[-1, :].reshape(3, 3)
 
     # Enforcing the internal constraint that two singular values must be
@@ -101,7 +111,7 @@ class EssentialMatrixTransform(object):
     self.params = U @ np.diag(S) @ V
 
     return True
-    
+
   def residuals(self, src, dst):
     # Compute the Sampson distance.
     src_homogeneous = np.column_stack([src, np.ones(src.shape[0])])

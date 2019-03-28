@@ -1,11 +1,40 @@
 import pygame
 from pygame.locals import DOUBLEBUF
+from frame import Frame
+import numpy as np
+import cv2
+from helpers import myjet
+
+def annotate(frame: Frame, img : np.ndarray) -> np.ndarray:
+        # paint annotations on the image
+        for i1 in range(len(frame.key_points)):
+            u1, v1 = int(round(frame.key_points[i1][0])), int(round(frame.key_points[i1][1]))
+            if frame.pts[i1] is not None:
+                if len(frame.pts[i1].frames) >= 5:
+                    cv2.circle(img, (u1, v1), color=(0,255,0), radius=3)
+                else:
+                    cv2.circle(img, (u1, v1), color=(0,128,0), radius=3)
+                # draw the trail
+                pts = []
+                lfid = None
+                for f, idx in zip(frame.pts[i1].frames[-9:][::-1], frame.pts[i1].idxs[-9:][::-1]):
+                    if lfid is not None and lfid-1 != f.id:
+                        break
+                    pts.append(tuple(map(lambda x: int(round(x)), f.key_points[idx])))
+                    lfid = f.id
+                if len(pts) >= 2:
+                    cv2.polylines(img, np.array([pts], dtype=np.int32), False, myjet[len(pts)]*255, thickness=1, lineType=16)
+            else:
+                cv2.circle(img, (u1, v1), color=(0,0,0), radius=3)
+        return img
+
 
 class Display2D(object):
   def __init__(self, W, H):
     pygame.init()
     self.screen = pygame.display.set_mode((W, H), DOUBLEBUF)
     self.surface = pygame.Surface(self.screen.get_size()).convert()
+    self.add_text("")
 
   def paint(self, img):
     # junk
@@ -18,9 +47,15 @@ class Display2D(object):
     # RGB, not BGR (might have to switch in twitchslam)
     pygame.surfarray.blit_array(self.surface, img.swapaxes(0,1)[:, :, [0,1,2]])
     self.screen.blit(self.surface, (0,0))
-
+    self.screen.blit(self.text, (0 , 50))
     # blit
     pygame.display.flip()
+
+  def add_text(self, text):
+      color = (200, 000, 000)
+      font_type = 'Comicsans'
+      font = pygame.font.SysFont(font_type, 50)
+      self.text = font.render(text, True, color)
 
 from multiprocessing import Process, Queue
 import pangolin
